@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/Counters.sol";
 import { Strings } from '@openzeppelin/contracts/utils/Strings.sol';
 import { Base64 } from 'base64-sol/base64.sol';
 import "hardhat/console.sol";
+import "./interfaces/IOffChainDataSource.sol";
 
 
 contract StoryPass is ERC721URIStorage {
@@ -24,6 +25,7 @@ contract StoryPass is ERC721URIStorage {
 
     mapping (address => string) public registeredBadges;
     address[] public registeredNfts;
+    IOffChainDataSource public offChainDS;
 
     struct TokenURIParams {
         string passId;
@@ -32,6 +34,7 @@ contract StoryPass is ERC721URIStorage {
         string description;
         string background;
         string badges;
+        string offChainData;
     }
 
     struct SVGParams {
@@ -39,11 +42,25 @@ contract StoryPass is ERC721URIStorage {
         string grade;
         string background;
         string badges;
+        string offChainData;
     }
 
 
     constructor() ERC721 ("StoryPass", "SPASS") {
 
+    }
+
+    function setOffChainDataSource(IOffChainDataSource offChainDS_) external{
+        offChainDS = offChainDS_;
+    }
+
+    function getOffChainData(uint tokenId_) internal view returns(string memory data) {
+        address owner = ownerOf(tokenId_);
+        if (address(offChainDS) != address(0)) {
+            data = offChainDS.getData(owner);
+        } else {
+            data = "";
+        }
     }
 
     function register(address nft, string memory badge) external {
@@ -77,12 +94,13 @@ contract StoryPass is ERC721URIStorage {
         string memory badgeString = "";
         address owner = ownerOf(tokenId_);
         for (uint i = 0; i < registeredNfts.length; i++) {
-           if (IERC721(registeredNfts[i]).balanceOf(owner) > 0) {
-               badgeString = string(abi.encodePacked(badgeString, registeredBadges[registeredNfts[i]]));
-           }
+            if (IERC721(registeredNfts[i]).balanceOf(owner) > 0) {
+                badgeString = string(abi.encodePacked(badgeString, registeredBadges[registeredNfts[i]]));
+            }
         }
         return badgeString;
     }
+
     function tokenURI(uint256 tokenId_) public view override returns (string memory) {
         require(_exists(tokenId_), 'URI query for nonexistent token');
         string memory passId = tokenId_.toString();
@@ -91,25 +109,27 @@ contract StoryPass is ERC721URIStorage {
         string memory grade = grades[tokenGrades[tokenId_]];
         string memory background = backgrounds[tokenGrades[tokenId_]];
         string memory badges = getBadges(tokenId_);
+        string memory offChainData = getOffChainData(tokenId_);
+
         TokenURIParams memory params = TokenURIParams({
-            passId: passId,
-            grade: grade,
-            name: name,
-            description: description,
-            background: background,
-            badges: badges
+        passId: passId,
+        grade: grade,
+        name: name,
+        description: description,
+        background: background,
+        badges: badges,
+        offChainData: offChainData
         });
         return constructTokenURI(params);
-
     }
 
     function constructTokenURI(TokenURIParams memory params)
-        public
-        pure
-        returns (string memory)
+    public
+    pure
+    returns (string memory)
     {
         string memory image = generateSVGImage(
-            SVGParams({ passId: params.passId, grade: params.grade, background: params.background, badges: params.badges })
+            SVGParams({ passId: params.passId, grade: params.grade, background: params.background, badges: params.badges, offChainData: params.offChainData })
         );
 
         return string(
@@ -125,21 +145,25 @@ contract StoryPass is ERC721URIStorage {
     }
 
     function generateSVGImage(SVGParams memory params)
-        internal
-        pure
-        returns (string memory svg)
+    internal
+    pure
+    returns (string memory svg)
     {
         return Base64.encode(bytes(generateSVG(params)));
     }
 
     function generateSVG(SVGParams memory params) internal pure returns (string memory svg) {
 
-        return string(
+        string memory svg_start = string(
             abi.encodePacked(
                 _SVG_START_TAG,
-                '<style>.base { fill: white; font-family: serif; font-size: 14px; }</style>',
+                '<style>.base { fill: white; font-family: serif; font-size: 14px; }</style>'));
+        return string(
+            abi.encodePacked(
+                svg_start,
                 '<rect width="100%" height="100%" fill="', params.background, '" />',
                 '<text x="50%" y="50%" class="base" dominant-baseline="middle" text-anchor="middle"> ', params.grade, ' Pass ', params.passId, ' </text>',
+                '<text x="20%" y="80%" class="base" dominant-baseline="middle" text-anchor="middle"> Achievements : ', params.offChainData, ' </text>',
                 params.badges,
                 _SVG_END_TAG
             )
